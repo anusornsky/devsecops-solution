@@ -75,6 +75,11 @@ func New(svc *app.Service, orders *app.OrderService, db Pinger, log *slog.Logger
 		respond(w, log, ps, err, http.StatusOK)
 	})
 
+	mux.HandleFunc("GET /products/search", func(w http.ResponseWriter, r *http.Request) {
+		ps, err := svc.Search(r.Context(), r.URL.Query().Get("q"))
+		respond(w, log, ps, err, http.StatusOK)
+	})
+
 	mux.HandleFunc("GET /products/{sku}", func(w http.ResponseWriter, r *http.Request) {
 		p, err := svc.Get(r.Context(), r.PathValue("sku"))
 		respond(w, log, p, err, http.StatusOK)

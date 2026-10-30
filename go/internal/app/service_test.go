@@ -126,3 +126,8 @@ func TestMoveWithZeroQtyIsInvalid(t *testing.T) {
 		t.Errorf("Receive 0: err = %v, want ErrInvalid", err)
 	}
 }
+
+// Search ของปลอม — เทสต์ของ service ไม่ได้ใช้ แต่ต้องมีให้ครบตาม interface (ไม่งั้น compile ไม่ผ่าน)
+func (m *memRepo) Search(_ context.Context, _ string) ([]domain.Product, error) {
+	return []domain.Product{}, nil
+}

@@ -41,6 +41,12 @@ public static class ProductEndpoints
         products.MapGet("/{sku}", async (string sku, StockService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetAsync(sku, ct)));
 
+        // ❌ ตั้งใจให้มีช่องโหว่เพื่อฝึก — เอาสิ่งที่ user ส่งมาต่อเข้า SQL ตรงๆ
+        products.MapGet("/search", async (string q, StockDbContext db, CancellationToken ct) =>
+            Results.Ok(await db.Products
+                .FromSqlRaw("SELECT * FROM products WHERE name LIKE '%" + q + "%'")
+                .ToListAsync(ct)));
+
         products.MapPost("/", async (CreateProductRequest req, StockService svc, CancellationToken ct) =>
         {
             var p = await svc.CreateAsync(req.Sku, req.Name, req.Qty, req.Price, ct);
