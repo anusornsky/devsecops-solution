@@ -1,3 +1,42 @@
+# DevSecOps Lab — stock API (Go + C#)
+
+![security](https://github.com/anusornsky/devsecops-lab/actions/workflows/security.yml/badge.svg) ![ci](https://github.com/anusornsky/devsecops-lab/actions/workflows/ci.yml/badge.svg) ![deploy](https://github.com/anusornsky/devsecops-lab/actions/workflows/deploy.yml/badge.svg)
+
+## ทำอะไร
+
+pipeline ที่ตรวจ security ทุกครั้งที่ push แล้ว deploy ขึ้น AWS (ECR → ECS Fargate) โดยไม่มี AWS key เก็บไว้ที่ไหนเลย (OIDC)
+
+## ด่านตรวจ
+
+| ด่าน | เครื่องมือ | จับอะไร | จับอะไรไม่ได้ (ลองแล้ว) | หลักฐาน |
+|---|---|---|---|---|
+| secret | gitleaks (ทุก commit) | key ที่ลบไปแล้วแต่ยังอยู่ใน history | key ที่ไม่ตรงรูปแบบ `AKIA[A-Z2-7]{16}` · ถ้า checkout ไม่มี `fetch-depth: 0` เห็นแค่ commit ล่าสุด | job `secrets` |
+| SAST | Semgrep `p/csharp` `p/golang` | pattern อันตรายทั่วไป | `FromSqlRaw` ที่ต่อ string ใน Step 3 (0 findings) | job `sast` |
+| test | xUnit / go test | SQL injection ใน `/products/search` | — | commit `test(step3)` แดง → `fix(step3)` เขียว |
+| SCA | govulncheck · NuGet audit | Go stdlib 1.26.7 (8 ข้อ) · SQLite native lib 2.1.10 (High) | ช่องโหว่ที่ยังไม่ประกาศ | job `sca` (รายงาน — เปิด log) |
+| image | SBOM (Syft) · Grype | 410 CVE ใน image แบบ unsafe vs 7 ใน chiseled | — | [docs/05-image-compare.md](docs/05-image-compare.md) |
+| DAST | ZAP baseline | header ที่ขาด (`nosniff` แก้แล้ว) | SQL injection / IDOR (baseline ไม่ยิง payload) | job `dast` (artifact zap-report) |
+| IaC | Checkov | bucket public · ไม่เข้ารหัส · ECR tag เปลี่ยนได้ | ค่าใช้จ่าย · เปลี่ยนชื่อ resource แล้ว destroy ของจริง (ต้องอ่าน plan เอง) | job `checkov` · skip ทุกข้อมีเหตุผลในโค้ด |
+| deploy | OIDC → ECR → ECS | — | — | [docs/07-oidc.md](docs/07-oidc.md) |
+
+## เรื่องที่เจอจริง
+
+- ใส่ช่องโหว่ SQL injection เอง (tag `vuln-demo`) → เจาะ → test แดง → แก้ → เขียว · [post-mortem](docs/postmortem-001.md)
+- image unsafe vs chiseled: CVE 410 vs 7 · ขนาด 1.56GB vs 231MB
+- Go 1.26.7 มีช่องโหว่ stdlib 8 ข้อ / SQLite native lib High → อัปเกรดแล้วสะอาด test ผ่านหมด
+- `sdk:latest` เปลี่ยนจาก .NET 9 เป็น 10 ทำ build พัง (global.json ล็อก 9.0.317) → เหตุผลที่ต้องล็อกเวอร์ชัน
+
+## รันบน AWS
+
+ECS Fargate 1 task (public IP · ไม่มี load balancer · ~$9/เดือน) · หา URL: `& .\infra\url.ps1` · ปิด: `terraform -chdir=infra apply -var desired_count=0`
+
+## ถ้าทำใหม่จะทำอะไรต่าง
+
+- เพิ่ม request log + alert ตั้งแต่แรก — ตอนนี้รู้ตัวช้าเพราะ log แค่ error
+- ใช้ Postgres/RDS แทน SQLite ใน container ถ้าข้อมูลต้องอยู่รอดข้าม deploy
+
+---
+
 # go-csharp-lab — API สต็อกสินค้า เขียน 2 ภาษาวางเทียบกัน
 
 ระบบเดียวกันทุกอย่าง (URL · กฎ · ข้อความ error · ชื่อตาราง · ชื่อเทสต์) เขียนด้วย **Go** และ **C# (ASP.NET Core + EF Core)**
