@@ -1,0 +1,37 @@
+# .github/dependabot.yml — ตรวจอัปเดตทุกสัปดาห์ รวมเป็น PR กลุ่มเดียวต่อ ecosystem (กัน PR ท่วม)
+version: 2
+updates:
+  - package-ecosystem: "nuget"
+    directories:            # ชี้ไปที่โฟลเดอร์ที่มีไฟล์ .csproj (ไม่ใช่รากของ repo)
+      - "/csharp/StockApi"
+      - "/csharp/StockApi.Tests"
+    schedule:
+      interval: "weekly"
+    groups:
+      nuget-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]   # major แยก PR เอง เพราะมัก breaking
+
+  - package-ecosystem: "gomod"
+    directory: "/go"        # โฟลเดอร์ที่มี go.mod
+    schedule:
+      interval: "weekly"
+    groups:
+      go-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "docker"
+    directories:            # โฟลเดอร์ที่มี Dockerfile — 2 ไฟล์
+      - "/csharp"
+      - "/go"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"          # Dependabot ไปหาเองที่ /.github/workflows
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]
