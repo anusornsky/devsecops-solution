@@ -1,0 +1,56 @@
+# .github/workflows/cosign-envkey.yml — R3: พิสูจน์ว่า `--key env://COSIGN_PRIVATE_KEY` ใช้งานได้จริง
+# ของจริง: เก็บเนื้อไฟล์ cosign.key ไว้ใน GitHub secret แล้วส่งเข้า env ด้วยบรรทัดเดียว (ดู comment ใน step sign)
+# ที่นี่จำลองด้วยการสร้างกุญแจใน job แล้วยัดเนื้อไฟล์ลง env ผ่าน $GITHUB_ENV (เหมือนที่ secret มาถึง)
+name: cosign-envkey
+on:
+  push:
+    branches: [realworld]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  envkey:
+    runs-on: ubuntu-latest
+    services:
+      registry:
+        image: registry:2@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+        ports:
+          - 5000:5000
+    env:
+      REPO: localhost:5000/stockapi-cs
+      COSIGN_PASSWORD: selftest-only   # ของจริง: secrets.COSIGN_PASSWORD
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.4
+
+      - name: จำลอง secret (สร้างกุญแจ -> ยัดเนื้อ cosign.key ลง env ด้วยรูปแบบหลายบรรทัด)
+        run: |
+          cosign generate-key-pair
+          cosign signing-config create --out no-rekor.json
+          {
+            echo "COSIGN_PRIVATE_KEY<<KEY_EOF"
+            cat cosign.key
+            echo "KEY_EOF"
+          } >> "$GITHUB_ENV"
+          rm cosign.key    # หลังจากนี้ไม่มีไฟล์กุญแจส่วนตัวบนดิสก์ — เหลือแต่ใน env เหมือนของจริง
+          ls cosign.key 2>&1 || true
+
+      - name: build + push
+        run: |
+          docker build -t "$REPO:v1" csharp
+          docker push "$REPO:v1"
+          echo "REF=$(docker inspect --format '{{index .RepoDigests 0}}' "$REPO:v1")" >> "$GITHUB_ENV"
+
+      - name: sign ด้วย --key env://COSIGN_PRIVATE_KEY
+        # ของจริงบรรทัดนี้จะอยู่ใน env ของ step:
+        #   COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+        run: cosign sign --yes --key env://COSIGN_PRIVATE_KEY --signing-config no-rekor.json "$REF"
+
+      - name: verify ด้วย cosign.pub (ไม่ต้องใช้ private key)
+        run: |
+          cosign verify --key cosign.pub --insecure-ignore-tlog "$REF"
+          echo "OK: เซ็นด้วย env://COSIGN_PRIVATE_KEY ตรวจผ่านด้วย cosign.pub"
