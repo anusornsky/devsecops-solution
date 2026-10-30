@@ -15,6 +15,7 @@ type Repository interface {
 	Create(ctx context.Context, p domain.Product) error          // มีแล้ว → domain.ErrAlreadyExists
 	Get(ctx context.Context, sku string) (domain.Product, error) // ไม่มี → domain.ErrNotFound
 	List(ctx context.Context) ([]domain.Product, error)
+	Search(ctx context.Context, q string) ([]domain.Product, error)
 	Receive(ctx context.Context, sku string, qty int) (domain.Product, error)
 	// Issue ต้องกันเบิกเกินแบบ atomic (ทำในคำสั่งเดียวที่ฐานข้อมูล) → domain.ErrInsufficientStock
 	Issue(ctx context.Context, sku string, qty int) (domain.Product, error)
@@ -79,4 +80,9 @@ func (s *Service) Issue(ctx context.Context, sku string, qty int) (domain.Produc
 	}
 	s.log.Info("เบิกออก", "sku", sku, "qty", qty, "balance", p.Qty)
 	return p, nil
+}
+
+// Search ค้นสินค้าตามชื่อ
+func (s *Service) Search(ctx context.Context, q string) ([]domain.Product, error) {
+	return s.repo.Search(ctx, q)
 }

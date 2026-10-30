@@ -41,6 +41,12 @@ public static class ProductEndpoints
         products.MapGet("/{sku}", async (string sku, StockService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetAsync(sku, ct)));
 
+        // ✅ FromSql + $"..." → EF แปลง {q} เป็น parameter ข้อมูลไม่มีทางกลายเป็นคำสั่ง
+        products.MapGet("/search", async (string q, StockDbContext db, CancellationToken ct) =>
+            Results.Ok(await db.Products
+                .FromSql($"SELECT * FROM products WHERE name LIKE '%' || {q} || '%'")
+                .ToListAsync(ct)));
+
         products.MapPost("/", async (CreateProductRequest req, StockService svc, CancellationToken ct) =>
         {
             var p = await svc.CreateAsync(req.Sku, req.Name, req.Qty, req.Price, ct);

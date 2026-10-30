@@ -136,3 +136,26 @@ func (s *SQLite) Issue(ctx context.Context, sku string, qty int) (domain.Product
 	}
 	return s.Get(ctx, sku)
 }
+
+// queryProducts รัน SELECT แล้วอ่านทุกแถวเป็น []domain.Product (เหมือน List แต่รับ SQL เข้ามา)
+func (s *SQLite) queryProducts(ctx context.Context, query string, args ...any) ([]domain.Product, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []domain.Product{}
+	for rows.Next() {
+		var p domain.Product
+		if err := rows.Scan(&p.SKU, &p.Name, &p.Qty, &p.Price); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// Search ✅ ใช้ parameter (?) — driver เติมค่าให้ ข้อมูลไม่มีทางกลายเป็นคำสั่ง
+func (s *SQLite) Search(ctx context.Context, q string) ([]domain.Product, error) {
+	return s.queryProducts(ctx, "SELECT sku, name, qty, price FROM products WHERE name LIKE '%' || ? || '%'", q)
+}

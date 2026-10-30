@@ -26,3 +26,10 @@ jobs:
           IMAGE=${{ steps.ecr.outputs.registry }}/stockapi-cs:${{ github.sha }}
           docker build -t "$IMAGE" csharp
           docker push "$IMAGE"                       # tag = commit SHA → รู้ว่า image ไหนมาจากโค้ดไหน
+          LATEST=${{ steps.ecr.outputs.registry }}/stockapi-cs:latest
+          docker tag "$IMAGE" "$LATEST" && docker push "$LATEST"   # task definition ของ ECS ชี้ที่ :latest
+      - name: deploy to ECS
+        run: |
+          aws ecs update-service --cluster devsecops-lab --service stockapi --force-new-deployment --query 'service.serviceName' --output text
+          aws ecs wait services-stable --cluster devsecops-lab --services stockapi   # รอจน task ใหม่รันได้ ไม่งั้น job แดง
+          echo "deployed — หา URL: infra/url.ps1"

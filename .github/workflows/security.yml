@@ -1,0 +1,86 @@
+# .github/workflows/security.yml — ด่านตรวจ security ทุกครั้งที่ push / เปิด PR
+# Step 4: 3 job · Step 5 และ 6 จะต่อท้าย job ใหม่ในไฟล์นี้
+name: security
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read            # สิทธิ์ต่ำสุด — ทุก job แค่อ่านโค้ด
+
+jobs:
+  secrets:                  # ❗ job เดียวที่ตั้งให้ block merge ตั้งแต่แรก
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0    # ดึงประวัติทุก commit — ไม่ใส่ = gitleaks เห็นแค่ commit ล่าสุด
+      - name: gitleaks
+        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo -v
+
+  sast:                     # รายงานอย่างเดียว ยังไม่ block (ไม่ใส่ --error)
+    runs-on: ubuntu-latest
+    container: semgrep/semgrep   # shortcut: ใช้ tag ล่าสุด · ใช้จริงให้ล็อกเวอร์ชันหรือ digest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: semgrep scan --config p/csharp --config p/golang --metrics=off
+
+  sca:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+      - name: govulncheck
+        working-directory: go
+        continue-on-error: true      # เจอช่องโหว่ = เตือน ยังไม่ block (ค่อยเอาออกเมื่อพร้อม)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: csharp/global.json
+      - name: NuGet vulnerable packages
+        run: |
+          dotnet restore csharp/StockApi
+          dotnet list csharp/StockApi package --vulnerable --include-transitive
+
+  sbom:                     # Step 5 — รายการวัตถุดิบใน image เก็บไว้ทุก run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: docker build -t stockapi-cs csharp
+      - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: stockapi-cs    # ได้ไฟล์ SBOM เป็น artifact ของ run อัตโนมัติ
+
+  dast:                     # Step 6 — รันแอปจริงแล้วให้ ZAP ยิงจากข้างนอก
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: start app
+        run: |
+          docker build -t stockapi-cs csharp
+          docker run -d --name cs -p 8091:8080 stockapi-cs
+          sleep 5 && curl -fsS http://localhost:8091/healthz
+      - name: ZAP baseline
+        run: |
+          mkdir zap && chmod 777 zap   # container ของ ZAP เป็น user อื่น ต้องเขียนโฟลเดอร์นี้ได้
+          docker run --rm --network host -v "$PWD/zap:/zap/wrk:rw" ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t http://localhost:8091/products -r report.html -I
+          # -I = มี WARN ไม่ทำให้ job แดง (ดูใน report แทน)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: zap-report
+          path: zap/report.html
+
+  checkov:                  # Step 8 — ต่อท้ายใน security.yml · แดงเมื่อมีข้อไม่ผ่านที่ยังไม่ได้ skip พร้อมเหตุผล
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: checkov
+        working-directory: infra
+        run: docker run --rm -v "${PWD}:/tf" --workdir /tf bridgecrew/checkov --directory /tf --compact

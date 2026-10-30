@@ -188,4 +188,19 @@ public sealed class ApiTests : IDisposable
             Assert.True((int)status == 404 && body.Contains("ไม่พบคำสั่งซื้อ"), $"GET {path} → {(int)status} {body}, want 404 + ไม่พบคำสั่งซื้อ");
         }
     }
+
+    [Fact]
+    public async Task Search_ignores_sql_injection()
+    {
+        // Arrange — มีสินค้า 2 ตัว
+        await Call("POST", "/products", """{"sku":"PEN-001","name":"pen","qty":5}""");
+        await Call("POST", "/products", """{"sku":"INK-001","name":"ink","qty":5}""");
+
+        // Act — ค้นหาด้วย input อันตราย
+        var (status, body) = await Call("GET", "/products/search?q=" + Uri.EscapeDataString("' OR 1=1 --"));
+
+        // Assert — ไม่มีสินค้าชื่อแบบนั้น จึงต้องได้ list ว่าง
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal("[]", body);
+    }
 }
