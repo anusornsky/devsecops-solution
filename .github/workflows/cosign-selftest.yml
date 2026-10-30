@@ -30,6 +30,9 @@ jobs:
         run: |
           cosign version
           cosign generate-key-pair      # ได้ cosign.key + cosign.pub ในโฟลเดอร์นี้
+          # cosign v3: --tlog-upload=false ใช้ไม่ได้แล้ว (ลองแล้ว error) → ใช้ signing config ที่ไม่มี Rekor แทน
+          cosign signing-config create --out no-rekor.json
+          cat no-rekor.json
 
       - name: build + push (tag v1) แล้วจด digest
         run: |
@@ -47,11 +50,11 @@ jobs:
           upload-artifact: false
 
       - name: sign ด้วย digest (ไม่ใช่ tag)
-        # --tlog-upload=false = ไม่อัปโหลดขึ้น Rekor สาธารณะ (flag นี้ deprecated ใน v3 แต่ยังใช้ได้ — ทางใหม่คือ --signing-config ที่ไม่มี Rekor)
-        run: cosign sign --yes --key cosign.key --tlog-upload=false "$REF"
+        # --signing-config ไม่มี Rekor = ไม่อัปโหลดอะไรขึ้น log สาธารณะ
+        run: cosign sign --yes --key cosign.key --signing-config no-rekor.json "$REF"
 
       - name: แนบ SBOM เป็น attestation
-        run: cosign attest --yes --key cosign.key --tlog-upload=false --type spdxjson --predicate sbom.spdx.json "$REF"
+        run: cosign attest --yes --key cosign.key --signing-config no-rekor.json --type spdxjson --predicate sbom.spdx.json "$REF"
 
       - name: verify ลายเซ็น + SBOM (ต้องผ่าน)
         # --insecure-ignore-tlog เพราะเราไม่ได้ลง Rekor — ใช้ได้เพราะเรา pin กุญแจ cosign.pub เอง
