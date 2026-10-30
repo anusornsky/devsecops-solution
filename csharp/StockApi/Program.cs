@@ -81,6 +81,12 @@ using (var scope = app.Services.CreateScope()) // using = เรียก Dispos
 }
 
 // ── (2) pipeline: ลำดับมีผล — ตัวจับ error ต้องอยู่หน้าสุด ถึงจะห่อ endpoint ทุกตัวได้
+// ใส่ header กันเบราว์เซอร์เดาชนิดไฟล์ (ZAP [10021]) — ทุก response ผ่าน middleware นี้
+app.Use(async (ctx, next) =>
+{
+    ctx.Response.Headers.XContentTypeOptions = "nosniff";
+    await next();
+});
 app.UseStockErrorHandling();
 app.MapProductEndpoints();
 app.MapOrderEndpoints();

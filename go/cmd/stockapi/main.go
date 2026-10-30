@@ -68,7 +68,7 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: httpapi.New(app.NewService(db, log), orders, db, log),
+		Handler: securityHeaders(httpapi.New(app.NewService(db, log), orders, db, log)),
 		// timeout กัน client ช้า/ค้างกิน connection ไปเรื่อยๆ (ค่า default ของ Go = ไม่มี timeout เลย)
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
@@ -112,4 +112,12 @@ func envOr(getenv func(string) string, key, def string) string {
 		return v
 	}
 	return def
+}
+
+// securityHeaders ใส่ header กันเบราว์เซอร์เดาชนิดไฟล์ (ZAP [10021]) ให้ทุก response
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		next.ServeHTTP(w, r)
+	})
 }
