@@ -155,7 +155,7 @@ func (s *SQLite) queryProducts(ctx context.Context, query string, args ...any) (
 	return out, rows.Err()
 }
 
-// Search ❌ ตั้งใจให้มีช่องโหว่เพื่อฝึก — ต่อ string เข้า SQL ตรงๆ
+// Search ✅ ใช้ parameter (?) — driver เติมค่าให้ ข้อมูลไม่มีทางกลายเป็นคำสั่ง
 func (s *SQLite) Search(ctx context.Context, q string) ([]domain.Product, error) {
-	return s.queryProducts(ctx, "SELECT sku, name, qty, price FROM products WHERE name LIKE '%"+q+"%'")
+	return s.queryProducts(ctx, "SELECT sku, name, qty, price FROM products WHERE name LIKE '%' || ? || '%'", q)
 }
