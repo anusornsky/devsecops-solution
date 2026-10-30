@@ -17,7 +17,7 @@ resource "aws_s3_bucket" "lab" {
   #checkov:skip=CKV_AWS_144:ไม่ต้อง replicate ข้าม region สำหรับงานฝึก (เสียค่า storage 2 เท่า)
   #checkov:skip=CKV2_AWS_61:destroy ทิ้งทุกครั้งที่จบ lab จึงไม่ต้องมี lifecycle rule
   #checkov:skip=CKV2_AWS_62:ไม่มีระบบไหนรอ event จาก bucket นี้
-  bucket       = "devsecops-lab-${random_id.suffix.hex}" # ชื่อ bucket ห้ามซ้ำทั้งโลก
+  bucket        = "devsecops-lab-${random_id.suffix.hex}" # ชื่อ bucket ห้ามซ้ำทั้งโลก
   force_destroy = true                                    # งานฝึก: destroy ได้แม้มีไฟล์อยู่
 }
 
@@ -43,7 +43,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "lab" {
 
 resource "aws_ecr_repository" "lab" {
   #checkov:skip=CKV_AWS_136:ใช้การเข้ารหัสเริ่มต้นของ ECR (AES256) ไม่สร้าง KMS key
-  name                = "devsecops-lab-tf" # คนละชื่อกับ stockapi-cs ที่สร้างมือใน Step 7
+  name                 = "devsecops-lab-tf" # คนละชื่อกับ stockapi-cs ที่สร้างมือใน Step 7
   image_tag_mutability = "IMMUTABLE"
   force_delete         = true
   image_scanning_configuration { scan_on_push = true }
