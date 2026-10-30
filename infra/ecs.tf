@@ -78,11 +78,12 @@ resource "aws_security_group" "app" {
     cidr_blocks = [var.allowed_cidr]
   }
 
+  # ขาออกเปิดแค่ HTTPS: ดึง image จาก ECR + ส่ง log ไป CloudWatch ใช้ 443 ทั้งหมด (DNS ของ VPC ไม่ผ่าน security group)
   egress {
-    description = "pull image from ECR + write logs"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    description = "HTTPS to ECR and CloudWatch Logs"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
@@ -95,10 +96,23 @@ resource "aws_ecs_task_definition" "app" {
   memory                   = "512"
   execution_role_arn       = aws_iam_role.execution.arn
 
+  # root filesystem อ่านอย่างเดียว — เขียนได้แค่ 2 ที่ที่แอปต้องใช้ (volume ชั่วคราวของ Fargate หายเมื่อ task หยุด)
+  volume {
+    name = "data"
+  }
+  volume {
+    name = "tmp"
+  }
+
   container_definitions = jsonencode([{
-    name      = "stockapi"
-    image     = "${data.aws_ecr_repository.app.repository_url}:latest"
-    essential = true
+    name                   = "stockapi"
+    image                  = "${data.aws_ecr_repository.app.repository_url}:latest"
+    essential              = true
+    readonlyRootFilesystem = true
+    mountPoints = [
+      { sourceVolume = "data", containerPath = "/data", readOnly = false },
+      { sourceVolume = "tmp", containerPath = "/tmp", readOnly = false },
+    ]
     portMappings = [{
       containerPort = 8080
       protocol      = "tcp"
