@@ -96,23 +96,11 @@ resource "aws_ecs_task_definition" "app" {
   memory                   = "512"
   execution_role_arn       = aws_iam_role.execution.arn
 
-  # root filesystem อ่านอย่างเดียว — เขียนได้แค่ 2 ที่ที่แอปต้องใช้ (volume ชั่วคราวของ Fargate หายเมื่อ task หยุด)
-  volume {
-    name = "data"
-  }
-  volume {
-    name = "tmp"
-  }
-
+  #checkov:skip=CKV_AWS_336:แอปเขียน SQLite ลง /data — ลองทำ read-only + volume ชั่วคราวของ Fargate แล้ว volume เป็นของ root แต่แอปรันเป็น user 1654 → SQLite Error 14 task ดับวน (2026-10-30) · แก้จริงต้องย้ายข้อมูลไป RDS/EFS
   container_definitions = jsonencode([{
-    name                   = "stockapi"
-    image                  = "${data.aws_ecr_repository.app.repository_url}:latest"
-    essential              = true
-    readonlyRootFilesystem = true
-    mountPoints = [
-      { sourceVolume = "data", containerPath = "/data", readOnly = false },
-      { sourceVolume = "tmp", containerPath = "/tmp", readOnly = false },
-    ]
+    name      = "stockapi"
+    image     = "${data.aws_ecr_repository.app.repository_url}:latest"
+    essential = true
     portMappings = [{
       containerPort = 8080
       protocol      = "tcp"
