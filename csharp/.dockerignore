@@ -1,0 +1,6 @@
+# ของที่ไม่ต้องส่งเข้า docker build (bin/obj ของ Windows ปนเข้าไปจะทำ build พัง)
+Dockerfile
+**/bin/
+**/obj/
+**/*.db*
+StockApi.Tests/

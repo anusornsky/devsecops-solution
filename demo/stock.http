@@ -1,0 +1,97 @@
+# ยิงคำขอทีละอันได้จาก VS 2022 (เปิดไฟล์นี้ → กด "Send request" เหนือแต่ละบล็อก) หรือ VS Code + ส่วนขยาย REST Client
+# ใช้ไฟล์เดียวกันกับทั้ง 2 ภาษา — เปลี่ยน @host บรรทัดล่างอย่างเดียว
+#   Go = 8082 (cd go ; go run ./cmd/stockapi)
+#   C# = 8081 (cd csharp ; dotnet run --project StockApi  หรือกด F5 ใน VS 2022)
+@host = http://127.0.0.1:8082
+
+### 1. ระบบยังทำงานไหม (เช็คฐานข้อมูลด้วย) → 200 {"status":"ok"}
+GET {{host}}/healthz
+
+### 2. สร้างสินค้า — sku ตัวเล็ก/มีช่องว่าง ระบบแปลงเป็น "AB-001" ให้ → 201
+POST {{host}}/products
+Content-Type: application/json
+
+{"sku":" ab-001 ","name":"น็อต M6","qty":10}
+
+### 3. สร้างซ้ำ → 409 มีสินค้านี้แล้ว
+POST {{host}}/products
+Content-Type: application/json
+
+{"sku":"AB-001","name":"ซ้ำ","qty":1}
+
+### 4. ข้อมูลผิดกฎ → 400 ข้อมูลไม่ถูกต้อง
+POST {{host}}/products
+Content-Type: application/json
+
+{"sku":"x","name":"","qty":-1}
+
+### 5. ดูทั้งหมด → 200 [...]
+GET {{host}}/products
+
+### 6. ดูตัวเดียว → 200
+GET {{host}}/products/AB-001
+
+### 7. ไม่มีสินค้านี้ → 404
+GET {{host}}/products/NOPE-1
+
+### 8. รับของเข้า 5 → qty 15
+POST {{host}}/products/AB-001/receive
+Content-Type: application/json
+
+{"qty":5}
+
+### 9. เบิกเกินที่มี → 409 สต็อกไม่พอ (ยอดไม่เปลี่ยน)
+POST {{host}}/products/AB-001/issue
+Content-Type: application/json
+
+{"qty":20}
+
+### 10. เบิก 15 → qty 0
+POST {{host}}/products/AB-001/issue
+Content-Type: application/json
+
+{"qty":15}
+
+### 11. พิมพ์ชื่อช่องผิด (nmae) → 400
+POST {{host}}/products
+Content-Type: application/json
+
+{"sku":"AB-2","nmae":"typo"}
+
+### 12. method ที่ไม่มี → 405
+DELETE {{host}}/products/AB-001
+
+### ── ระบบสั่งซื้อ ── (ลบ stock.db เก่าก่อน ถ้ามีจากก่อนเพิ่มราคา)
+
+### 13. สินค้ามีราคา (สตางค์: 1500 = 15 บาท)
+POST {{host}}/products
+Content-Type: application/json
+
+{"sku":"PEN-001","name":"ปากกา","qty":10,"price":1500}
+
+### 14. สินค้าเหลือ 1 ชิ้น
+POST {{host}}/products
+Content-Type: application/json
+
+{"sku":"CUP-001","name":"แก้ว","qty":1,"price":5000}
+
+### 15. สั่งซื้อ → 202 pending (ยังไม่ได้ตัดสต็อก)
+POST {{host}}/orders
+Content-Type: application/json
+
+{"items":[{"sku":"PEN-001","qty":2},{"sku":"CUP-001","qty":1}]}
+
+### 16. ถามสถานะ (รอครึ่งวินาทีแล้วกด) → done total 8000
+GET {{host}}/orders/1
+
+### 17. สั่งของที่หมดแล้ว → 202 แต่สักพักจะเป็น failed
+POST {{host}}/orders
+Content-Type: application/json
+
+{"items":[{"sku":"PEN-001","qty":1},{"sku":"CUP-001","qty":1}]}
+
+### 18. → failed "สต็อกไม่พอ: CUP-001 (มี 0 ต้องการ 1)" · PEN-001 ต้องยังเหลือ 8 (rollback)
+GET {{host}}/orders/2
+
+### 19. เช็คว่า PEN-001 ไม่ถูกตัดจาก order ที่ล้มเหลว
+GET {{host}}/products/PEN-001

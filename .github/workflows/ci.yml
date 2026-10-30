@@ -1,0 +1,64 @@
+# CI = ทุกครั้งที่ push / เปิด PR → GitHub เปิดเครื่อง Linux ใหม่มารันตรวจให้ · ผ่านหมด = ✅ · พังตัวเดียว = ❌
+# 2 job (go / dotnet) รันพร้อมกันบนคนละเครื่อง
+# CD (deploy ขึ้น AWS) ยังไม่มี — จะเพิ่มเป็น job ต่อท้ายตอนบทเรียน AWS
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# สิทธิ์ต่ำสุด: แค่อ่านโค้ด (ค่าเริ่มต้นของ GitHub ให้สิทธิ์เขียนด้วย ไม่จำเป็น)
+permissions:
+  contents: read
+
+# push ซ้อนกันเร็วๆ → ยกเลิกรอบเก่าที่ยังรันไม่จบ ไม่ต้องรอ
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      # uses: ...@<SHA> = ล็อก action ไว้ที่ commit นั้นเป๊ะ (tag อย่าง v7 เจ้าของย้ายไปชี้โค้ดอื่นได้ · SHA เปลี่ยนไม่ได้)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod        # ใช้เวอร์ชันเดียวกับที่เขียนใน go.mod
+          cache-dependency-path: go/go.sum  # จำ library ที่โหลดแล้ว รอบหน้าเร็วขึ้น
+
+      - name: gofmt (โค้ดจัดรูปแบบแล้ว)
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - name: go vet (หาโค้ดน่าสงสัย)
+        run: go vet ./...
+      # -race = ตรวจจับ goroutine แย่งข้อมูลกัน · ต้องมี cgo → รันบนเครื่อง Windows ของเราไม่ได้ แต่ Linux ของ CI ได้
+      - name: go test
+        run: go test -race -cover ./...
+      - name: docker build
+        run: docker build -t stockapi-go .
+
+  dotnet:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: csharp
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: csharp/global.json # ใช้ SDK ตามที่ global.json ล็อกไว้
+
+      - name: restore
+        run: dotnet restore
+      - name: dotnet format (โค้ดจัดรูปแบบแล้ว)
+        run: dotnet format --verify-no-changes --no-restore
+      - name: build
+        run: dotnet build --no-restore -c Release
+      - name: test + coverage
+        run: dotnet test --no-build -c Release --collect:"XPlat Code Coverage"
+      - name: docker build
+        run: docker build -t stockapi-cs .

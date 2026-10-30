@@ -1,0 +1,13 @@
+bin/
+obj/
+TestResults/
+*.db
+*.db-wal
+*.db-shm
+*.exe
+.vs/
+*.user
+
+# ไฟล์ของ Claude ที่ไม่ต้องขึ้น git
+.claude/plans/
+.claude/reports/
