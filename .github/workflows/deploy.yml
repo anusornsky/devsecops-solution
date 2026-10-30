@@ -1,0 +1,28 @@
+# .github/workflows/deploy.yml — push image ขึ้น ECR ด้วย OIDC (ไม่มี AWS key ใน GitHub)
+name: deploy
+on:
+  push:
+    branches: [main]        # ต้องตรงกับ sub ใน trust policy (ref:refs/heads/main)
+  workflow_dispatch:        # กดรันเองได้ — ใช้ในด่านพิสูจน์ Step 7: gh workflow run deploy --ref ชื่อbranch
+
+permissions:
+  id-token: write           # ขอ OIDC token จาก GitHub — ขาดบรรทัดนี้ = "Could not load credentials"
+  contents: read
+
+jobs:
+  push-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}   # ARN ของ role · เก็บใน Settings → Variables (ไม่ใช่ secret)
+          aws-region: ap-southeast-1
+      - run: aws sts get-caller-identity --query Arn --output text | sed -E 's/[0-9]{12}/************/'   # ปิดเลขบัญชีใน log
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+      - name: build + push
+        run: |
+          IMAGE=${{ steps.ecr.outputs.registry }}/stockapi-cs:${{ github.sha }}
+          docker build -t "$IMAGE" csharp
+          docker push "$IMAGE"                       # tag = commit SHA → รู้ว่า image ไหนมาจากโค้ดไหน
