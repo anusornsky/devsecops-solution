@@ -89,3 +89,16 @@ jobs:
             echo "FAIL: image ที่ไม่เคยเซ็นตรวจผ่าน!"; exit 1
           fi
           echo "PASS: ของปลอมตรวจไม่ผ่านตามที่ต้องเป็น"
+
+      - name: เซ็นด้วย tag หลังโดนสลับ (พิสูจน์ว่าทำไมต้องเซ็นด้วย digest)
+        run: |
+          set +e   # ให้ job เขียวต่อให้ขั้นไหนล้ม — เราต้องการเห็น exit code จริง
+          echo "--- sign ด้วย tag $REPO:v1 (ตอนนี้ tag ชี้ไป $EVIL)"
+          cosign sign --yes --key cosign.key --signing-config no-rekor.json "$REPO:v1"
+          echo "sign-by-tag exit=$?"
+          echo "--- verify digest เดิม (REF)"
+          cosign verify --key cosign.pub --insecure-ignore-tlog "$REF" > /dev/null
+          echo "verify REF exit=$?"
+          echo "--- verify digest ใหม่ (EVIL)"
+          cosign verify --key cosign.pub --insecure-ignore-tlog "$EVIL" > /dev/null
+          echo "verify EVIL exit=$?"
