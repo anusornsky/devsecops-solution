@@ -1,0 +1,39 @@
+# Argo CD: "ให้ cluster ตรงกับ git เสมอ" · 1 Application = 1 env
+# apply ครั้งเดียวด้วยมือ (kubectl apply -f k8s/argocd/apps.yaml) · หลังจากนั้นทุกการเปลี่ยนแปลงไปทาง git เท่านั้น
+#   automated     = เห็น commit ใหม่ → sync เอง (ไม่ต้องมีใครกด) · Argo CD เช็ค git ทุก ~3 นาที
+#   prune         = ของที่ถูกลบออกจาก git → ลบออกจาก cluster ด้วย
+#   selfHeal      = ใครแก้ cluster ด้วยมือ (kubectl edit/patch) → ถูกแก้กลับให้ตรง git
+# staging เปลี่ยนเมื่อ pipeline (P5) commit tag ใหม่ · prod เปลี่ยนเมื่อ PR "promote" ถูก merge (มีคนตรวจก่อน)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: shop-staging
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/anusornsky/devsecops-solution.git
+    targetRevision: production
+    path: k8s/overlays/staging
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: shop-staging
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: shop-prod
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/anusornsky/devsecops-solution.git
+    targetRevision: production
+    path: k8s/overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: shop-prod
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
