@@ -1,0 +1,102 @@
+# .github/workflows/release.yml — ภาค 3 P5: pipeline เต็มสาย ตั้งแต่ push โค้ด จนถึง "บอก staging ให้ใช้ image ใหม่"
+# push branch production → ตรวจ (test · secret · SAST) → build → Trivy gate → push GHCR → SBOM → cosign เซ็น → แก้ tag ใน overlay staging
+# ไม่มี job ไหน "deploy เข้า cluster" — Argo CD ใน cluster เห็น commit ที่ job สุดท้ายทำ แล้วดึงไปเอง (P6 GitOps)
+name: release
+on:
+  push:
+    branches: [production]
+    paths: ['csharp/**', '.github/workflows/release.yml']   # แก้แค่ k8s/ (รวม commit ของ bot เอง) = ไม่ build ใหม่
+  workflow_dispatch:
+
+permissions:
+  contents: read            # ค่าเริ่มต้นทุก job · job ไหนต้องมากกว่านี้ขอเพิ่มเฉพาะตัว
+
+concurrency:
+  group: release            # ห้ามรันซ้อน: 2 รอบแก้ tag พร้อมกัน = push ชนกัน
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/stockapi
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: csharp/global.json
+      - run: dotnet test csharp/StockApi.Tests -c Release
+
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: gitleaks (secret ในประวัติ git)
+        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo -v -c /repo/.gitleaks.toml
+      - name: semgrep (SAST) · --error = เจอ = แดง
+        run: docker run --rm -v "$PWD:/src" semgrep/semgrep:1.184.0 semgrep scan --config p/csharp --metrics=off --error csharp
+
+  image:
+    needs: [test, scan]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write       # push ขึ้น GHCR ด้วย GITHUB_TOKEN (ไม่ต้องสร้าง token เอง)
+      id-token: write       # cosign keyless: ขอ OIDC token จาก GitHub ไปแลกใบรับรองชั่วคราวจาก Sigstore
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: build
+        run: docker build -t "$IMAGE:${{ github.sha }}" csharp
+      # gate ก่อน push: ช่องโหว่ CRITICAL ที่มีตัวแก้แล้ว = แดง และ image ไม่ขึ้น registry เลย
+      # --ignore-unfixed: ตัวที่ยังไม่มีใครแก้ บล็อกไปก็ทำอะไรไม่ได้ (ดูรายงานแทน) · ทางที่ไม่เลือก: HIGH ด้วย — base image แดงแทบทุกสัปดาห์จนทีมเลิกสนใจ
+      - name: trivy gate
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.76.2 \
+            image --exit-code 1 --severity CRITICAL --ignore-unfixed --no-progress "$IMAGE:${{ github.sha }}"
+      - id: push
+        name: push GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker push "$IMAGE:${{ github.sha }}"
+          # digest = ลายนิ้วมือของ image (tag ย้ายได้ digest ย้ายไม่ได้) · เซ็นที่ digest ไม่ใช่ที่ tag
+          echo "digest=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:${{ github.sha }}" | cut -d@ -f2)" >> "$GITHUB_OUTPUT"
+      - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - name: cosign sign + attest SBOM
+        run: |
+          cosign sign --yes "$IMAGE@${{ steps.push.outputs.digest }}"
+          cosign attest --yes --type spdxjson --predicate sbom.spdx.json "$IMAGE@${{ steps.push.outputs.digest }}"
+
+  bump-staging:
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # job เดียวที่เขียน repo ได้: commit tag ใหม่
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      # ตรวจลายเซ็นก่อนบอก staging ให้ใช้: ต้องเซ็นโดย workflow นี้ ของ repo นี้ เท่านั้น (ไม่ใช่ใครก็ได้ที่มีบัญชี Sigstore)
+      - name: cosign verify
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          cosign verify "$IMAGE@${{ needs.image.outputs.digest }}" \
+            --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null && echo "signature OK"
+      - name: set image in overlays/staging
+        working-directory: k8s/overlays/staging
+        run: |
+          kustomize edit set image "stockapi=$IMAGE:${{ github.sha }}@${{ needs.image.outputs.digest }}"
+          git config user.name "release-bot"
+          git config user.email "release-bot@users.noreply.github.com"
+          git commit -am "deploy(staging): stockapi ${{ github.sha }}"
+          git push

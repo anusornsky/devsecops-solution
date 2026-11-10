@@ -5,15 +5,12 @@ namespace: shop-prod
 resources:
   - namespace.yaml
   - ../../base
+  # P6: ความลับเข้ารหัสด้วย kubeseal → commit ได้ · ถอดได้เฉพาะตัวคุมใน cluster นี้ (ตัวเก่า: secretGenerator จาก db.env/tls.key ที่ไม่อยู่ใน git → Argo CD build ไม่ได้)
+  - sealed-db.yaml
+  - sealed-tls.yaml
 replicas:
   - name: stockapi
     count: 2
-secretGenerator:
-  - name: db-credentials
-    envs: [db.env]          # ไฟล์นี้ไม่อยู่ใน git (.gitignore) · สร้างเองตาม db.env.example
-  - name: stockapi-tls      # P4: cert ของ env นี้ · สร้างด้วย openssl (ดูบท P4) · ไม่อยู่ใน git
-    type: kubernetes.io/tls
-    files: [tls.crt, tls.key]
 patches:
   - target: { kind: Ingress, name: stockapi }
     patch: |-

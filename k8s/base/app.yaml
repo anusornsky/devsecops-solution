@@ -20,10 +20,12 @@ spec:
         fsGroup: 1654          # volume ที่ mount เขียนได้โดย user นี้ (ต่างจาก Fargate ที่เคยพังใน ภาค 2)
         seccompProfile: { type: RuntimeDefault }
       automountServiceAccountToken: false   # แอปไม่ต้องคุยกับ Kubernetes API → ไม่ให้กุญแจ
+      imagePullSecrets:            # GHCR ของ repo private ต้องมี token อ่าน package · สร้างเองต่อ namespace (ไม่อยู่ใน git · ดู P6)
+        - name: ghcr-pull
       containers:
         - name: stockapi
-          image: stockapi:local
-          imagePullPolicy: Never   # L1 ใช้ image ที่ import เข้า cluster เอง · P5 เปลี่ยนเป็น GHCR
+          image: stockapi:local    # overlay แทนด้วย ghcr.io/…:<sha>@<digest> (pipeline P5 เขียนให้)
+          imagePullPolicy: IfNotPresent   # tag = commit SHA ไม่เคยถูกเขียนทับ → มีในเครื่องแล้วไม่ต้องดึงซ้ำ
           ports:
             - containerPort: 8080
           # 3 probe ถามคนละคำถาม:
