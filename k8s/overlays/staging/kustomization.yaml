@@ -1,0 +1,19 @@
+# env staging · ต่างจาก env อื่นแค่: namespace · host · จำนวน replica · รหัส DB
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: shop-staging
+resources:
+  - namespace.yaml
+  - ../../base
+replicas:
+  - name: stockapi
+    count: 1
+secretGenerator:
+  - name: db-credentials
+    envs: [db.env]          # ไฟล์นี้ไม่อยู่ใน git (.gitignore) · สร้างเองตาม db.env.example
+patches:
+  - target: { kind: Ingress, name: stockapi }
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: stockapi.staging.localtest.me

@@ -1,0 +1,5 @@
+# ความลับของแต่ละ env · ห้าม commit
+**/db.env
+# กุญแจเข้า cluster
+kubeconfig*
+

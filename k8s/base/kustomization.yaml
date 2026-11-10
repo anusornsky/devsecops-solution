@@ -1,0 +1,11 @@
+# base = ของที่ทุก env มีเหมือนกัน · overlays/staging และ overlays/prod ปรับเฉพาะที่ต่าง
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - app.yaml
+  - db.yaml
+  - netpol.yaml
+  - ingress.yaml
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: stockapi

@@ -1,0 +1,16 @@
+# ประตูเดียวจากข้างนอก · host จริงใส่ใน overlay (localtest.me = ชื่อสาธารณะที่ชี้ 127.0.0.1 เสมอ)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: stockapi
+spec:
+  rules:
+    - host: PLACEHOLDER
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: stockapi
+                port: { number: 80 }

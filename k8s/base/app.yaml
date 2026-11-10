@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stockapi
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { tier: app }
+  template:
+    metadata:
+      labels: { tier: app }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1654        # user "app" ของ image Microsoft
+        fsGroup: 1654          # volume ที่ mount เขียนได้โดย user นี้ (ต่างจาก Fargate ที่เคยพังใน ภาค 2)
+        seccompProfile: { type: RuntimeDefault }
+      automountServiceAccountToken: false   # แอปไม่ต้องคุยกับ Kubernetes API → ไม่ให้กุญแจ
+      containers:
+        - name: stockapi
+          image: stockapi:local
+          imagePullPolicy: Never   # L1 ใช้ image ที่ import เข้า cluster เอง · P5 เปลี่ยนเป็น GHCR
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DB_PATH
+              value: /data/stock.db   # P3 เปลี่ยนเป็น Postgres
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { memory: 256Mi }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: data, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stockapi
+spec:
+  selector: { tier: app }
+  ports:
+    - port: 80
+      targetPort: 8080

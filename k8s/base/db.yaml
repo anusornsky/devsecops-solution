@@ -1,0 +1,33 @@
+# ชั้น DB (P3 จะทำให้เป็นของจริง: StatefulSet + volume ถาวร + backup) · ตอนนี้ใช้พิสูจน์ network policy
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { tier: db }
+  template:
+    metadata:
+      labels: { tier: db }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef: { name: db-credentials }   # สร้างจากไฟล์ db.env ที่ไม่อยู่ใน git (ดู overlays)
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 384Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+spec:
+  selector: { tier: db }
+  ports:
+    - port: 5432

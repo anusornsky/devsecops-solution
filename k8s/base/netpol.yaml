@@ -1,0 +1,43 @@
+# network 3 ชั้น: ingress (Traefik) → app → db · อื่นๆ ห้ามเข้า
+# 1) ปิดทุกทางเข้าของทุก pod ใน namespace ก่อน
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# 2) app รับจาก Traefik (อยู่ namespace kube-system) ที่ port 8080 เท่านั้น
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: app-from-ingress
+spec:
+  podSelector:
+    matchLabels: { tier: app }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: traefik }
+      ports:
+        - port: 8080
+---
+# 3) db รับจาก app ใน namespace เดียวกันที่ port 5432 เท่านั้น
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: db-from-app
+spec:
+  podSelector:
+    matchLabels: { tier: db }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { tier: app }
+      ports:
+        - port: 5432
