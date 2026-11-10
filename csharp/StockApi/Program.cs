@@ -33,11 +33,20 @@ builder.Logging.AddFilter("Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMidd
 //    อ่าน DB_PATH ตอนสร้าง (sp = service provider) ไม่ใช่ตอนนี้ → เทสต์เปลี่ยนไฟล์ DB ได้ทีหลัง
 //    ConfigureWarnings: SKU ซ้ำ = SQL ล้มตามที่ตั้งใจ (เราแปลงเป็น 409) แต่ EF log เป็น Error ไปก่อนแล้ว → ลดเป็น Debug
 //    ถ้าฐานข้อมูลพังจริง exception ยังวิ่งไปถึง ErrorHandling แล้วถูก log เป็น 500 พร้อมรายละเอียดครบ ไม่หายไปไหน
-builder.Services.AddDbContext<StockDbContext>((sp, o) => o
-    .UseSqlite($"Data Source={sp.GetRequiredService<IConfiguration>()["DB_PATH"] ?? "stock.db"}")
-    .ConfigureWarnings(w => w.Log(
+//    มี env DB_CONNECTION (Postgres) → ใช้ Postgres · ไม่มี → SQLite แบบเดิม (เครื่อง dev + เทสต์ไม่ต้องมี Postgres)
+//    ทางที่ไม่เลือก: ทิ้ง SQLite เลย — เทสต์ทุกตัวต้องเปิด Postgres ก่อน ช้าและพังง่ายบนเครื่องผู้เรียน
+builder.Services.AddDbContext<StockDbContext>((sp, o) =>
+{
+    var cfg = sp.GetRequiredService<IConfiguration>();
+    if (cfg["DB_CONNECTION"] is { Length: > 0 } pg)
+        // retry เมื่อ error ชั่วคราว (เช่น 57P01 ตอน DB restart: connection เก่าใน pool ตายไปแล้ว) · ไม่ใส่ = request แรกหลัง DB restart ได้ 500
+        o.UseNpgsql(pg, n => n.EnableRetryOnFailure());
+    else
+        o.UseSqlite($"Data Source={cfg["DB_PATH"] ?? "stock.db"}");
+    o.ConfigureWarnings(w => w.Log(
         (RelationalEventId.CommandError, LogLevel.Debug),
-        (CoreEventId.SaveChangesFailed, LogLevel.Debug))));
+        (CoreEventId.SaveChangesFailed, LogLevel.Debug)));
+});
 builder.Services.AddScoped<IProductRepository, EfProductRepository>(); // ขอ interface → ได้ตัวจริงที่ใช้ EF
 builder.Services.AddScoped<StockService>();
 builder.Services.AddScoped<IOrderRepository, EfOrderRepository>();
@@ -72,7 +81,21 @@ var app = builder.Build();
 // ⚠️ EnsureCreated ใช้ร่วมกับ migration ไม่ได้ — วันที่เปลี่ยนต้องลบบรรทัดนี้ทิ้ง
 using (var scope = app.Services.CreateScope()) // using = เรียก Dispose ให้อัตโนมัติเมื่อจบบล็อก (ปิด DbContext)
 {
-    scope.ServiceProvider.GetRequiredService<StockDbContext>().Database.EnsureCreated();
+    // ลองซ้ำตอนเริ่ม: บน k3s pod ใหม่ต่อ DB ไม่ได้ 1-5 วิแรก (NetworkPolicy ยังไม่รู้จัก IP ใหม่) หรือ DB กำลังเปิด
+    // ไม่ลอง = ตายแล้วให้ Kubernetes restart (RESTARTS ขึ้นทุก deploy → กลบ restart ที่เป็นปัญหาจริง) · EnableRetryOnFailure ไม่ครอบ EnsureCreated
+    for (var attempt = 1; ; attempt++)
+    {
+        try
+        {
+            scope.ServiceProvider.GetRequiredService<StockDbContext>().Database.EnsureCreated();
+            break;
+        }
+        catch (Exception ex) when (attempt < 15 && ex is System.Data.Common.DbException or Microsoft.EntityFrameworkCore.Storage.RetryLimitExceededException)
+        {
+            app.Logger.LogWarning("ต่อฐานข้อมูลไม่ได้ ลองใหม่ครั้งที่ {Attempt}: {Error}", attempt, ex.Message);
+            Thread.Sleep(TimeSpan.FromSeconds(2));
+        }
+    }
 
     // งานที่ค้าง processing จากรอบก่อน (โปรแกรมตายกลางงาน) → คืนเข้าคิว · ทำก่อน app.Run() = ก่อน worker เริ่ม
     var stuck = scope.ServiceProvider.GetRequiredService<IOrderRepository>().RecoverStuckAsync(CancellationToken.None).GetAwaiter().GetResult();

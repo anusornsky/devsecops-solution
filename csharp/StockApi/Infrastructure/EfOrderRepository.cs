@@ -61,7 +61,13 @@ public sealed class EfOrderRepository(StockDbContext db) : IOrderRepository
     //   3. order → done + ยอดรวม
     // รายการไหนไม่ผ่าน → throw → await using ปิด tx โดยไม่ Commit = rollback คืนสต็อกรายการก่อนหน้าทั้งหมด
     // ทางที่ไม่เลือก: ตัดทีละรายการแยกกัน แล้วเขียนโค้ด "คืนสต็อก" เองตอนพัง — ถ้าโปรแกรมตายระหว่างคืน ของหายถาวร
-    public async Task<long> FulfilAsync(long id, CancellationToken ct)
+    // Postgres เปิด EnableRetryOnFailure (Program.cs) → เปิด transaction เองตรงๆ ไม่ได้ (throw "does not support user-initiated transactions")
+    // ต้องให้ strategy ครอบทั้งก้อน: error ชั่วคราวกลางทาง → rollback แล้วเริ่มก้อนใหม่ทั้งก้อน (ไม่ใช่ retry ทีละคำสั่งจนตัดสต็อกซ้ำ)
+    // SQLite ไม่ได้เปิด retry → strategy เป็นแบบรันครั้งเดียว ทำงานเหมือนเดิม
+    public Task<long> FulfilAsync(long id, CancellationToken ct) =>
+        db.Database.CreateExecutionStrategy().ExecuteAsync(() => FulfilOnceAsync(id, ct));
+
+    private async Task<long> FulfilOnceAsync(long id, CancellationToken ct)
     {
         // ExecuteUpdateAsync ทุกตัวข้างล่างวิ่งใน transaction นี้ (EF ใช้ transaction ที่เปิดค้างไว้บน connection ให้เอง)
         await using var tx = await db.Database.BeginTransactionAsync(ct);

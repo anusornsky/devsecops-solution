@@ -22,7 +22,9 @@ public sealed class EfProductRepository(StockDbContext db) : IProductRepository
         }
         // when (...) = exception filter: จับเฉพาะเมื่อเงื่อนไขจริง ที่เหลือปล่อยผ่านไปเป็น 500
         // is SqliteException { ... } = pattern matching: "เป็นชนิดนี้ และ property นี้มีค่านี้"
-        catch (DbUpdateException ex) when (ex.InnerException is SqliteException { SqliteExtendedErrorCode: SqlitePrimaryKeyViolation })
+        // Postgres แจ้ง key ซ้ำด้วย SqlState "23505" (unique_violation) — ไม่จับตัวนี้ = SKU ซ้ำบน prod กลายเป็น 500
+        catch (DbUpdateException ex) when (ex.InnerException is SqliteException { SqliteExtendedErrorCode: SqlitePrimaryKeyViolation }
+                                               or Npgsql.PostgresException { SqlState: Npgsql.PostgresErrorCodes.UniqueViolation })
         {
             throw new ProductAlreadyExistsException();
         }
