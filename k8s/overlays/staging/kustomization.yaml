@@ -2,24 +2,31 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: shop-staging
-resources:
-  - namespace.yaml
-  - ../../base
   # P6: ความลับเข้ารหัสด้วย kubeseal → commit ได้ · ถอดได้เฉพาะตัวคุมใน cluster นี้ (ตัวเก่า: secretGenerator จาก db.env/tls.key ที่ไม่อยู่ใน git → Argo CD build ไม่ได้)
-  - sealed-db.yaml
-  - sealed-tls.yaml
+resources:
+- namespace.yaml
+- ../../base
+- sealed-db.yaml
+- sealed-tls.yaml
 replicas:
-  - name: stockapi
-    count: 1
+- count: 1
+  name: stockapi
 patches:
-  - target: { kind: Ingress, name: stockapi }
-    patch: |-
-      - op: replace
-        path: /spec/rules/0/host
-        value: stockapi.staging.localtest.me
-      - op: replace
-        path: /spec/tls/0/hosts/0
-        value: stockapi.staging.localtest.me
-      - op: replace          # ~1 = เครื่องหมาย / ในชื่อ annotation (กฎของ JSON patch)
-        path: /metadata/annotations/traefik.ingress.kubernetes.io~1router.middlewares
-        value: shop-staging-redirect-https@kubernetescrd
+- patch: |-
+    - op: replace
+      path: /spec/rules/0/host
+      value: stockapi.staging.localtest.me
+    - op: replace
+      path: /spec/tls/0/hosts/0
+      value: stockapi.staging.localtest.me
+    - op: replace          # ~1 = เครื่องหมาย / ในชื่อ annotation (กฎของ JSON patch)
+      path: /metadata/annotations/traefik.ingress.kubernetes.io~1router.middlewares
+      value: shop-staging-redirect-https@kubernetescrd
+  target:
+    kind: Ingress
+    name: stockapi
+images:
+- digest: sha256:ccc5f91a001640e06d646cc5c706eb14be0be70bcb9ac07b1dd1e7dd8bb9e04e
+  name: stockapi
+  newName: ghcr.io/anusornsky/stockapi
+  newTag: 7bc478f6ddff7dfc3602b674d6918d224ecccdbf
