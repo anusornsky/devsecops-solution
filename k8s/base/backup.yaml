@@ -1,0 +1,70 @@
+# backup อัตโนมัติ: ทุกคืน 02:00 pg_dump ลง volume แยกจาก DB · เก็บ 7 ไฟล์ล่าสุด
+# ทำไมแยก volume: DB volume พัง/โดนลบ backup ต้องไม่หายไปด้วย
+# shortcut: volume อยู่ในเครื่องเดียวกับ cluster — เครื่องพังก็หายทั้งคู่ · งานจริงส่งออกนอกเครื่อง (S3/R2) ด้วย
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: db-backups
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests: { storage: 1Gi }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: db-backup
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid          # รอบก่อนยังไม่เสร็จ = ไม่เริ่มรอบใหม่ซ้อน
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels: { tier: backup }    # NetworkPolicy db-from-backup เปิดให้ label นี้เข้า DB ได้
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70
+            fsGroup: 70
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: dump
+              image: postgres:17-alpine     # รุ่นเดียวกับ DB: pg_dump รุ่นเก่ากว่า server ใช้ไม่ได้
+              envFrom:
+                - secretRef: { name: db-credentials }
+              env:
+                - { name: PGHOST, value: db }
+                - name: PGPASSWORD
+                  valueFrom: { secretKeyRef: { name: db-credentials, key: POSTGRES_PASSWORD } }
+              # set -e: dump ล้ม = job ล้ม (ไม่ใช่ได้ไฟล์ว่างแล้วบอกว่าสำเร็จ) · เขียน .tmp ก่อนแล้วค่อย mv = ไม่มีไฟล์ครึ่งๆ
+              command:
+                - sh
+                - -c
+                - |
+                  set -e
+                  # pod ใหม่ต่อ DB ไม่ได้ช่วงวินาทีแรก (NetworkPolicy ของ k3s ยังไม่รู้จัก IP ใหม่ · พิสูจน์แล้ว: ทันที=no response, 5 วิ=ได้)
+                  for i in $(seq 30); do pg_isready -q && break; sleep 1; done
+                  rm -f /backups/*.tmp   # เศษจากรอบที่ล้ม (set -e ออกก่อนถึง mv) · ลบได้เพราะ concurrencyPolicy: Forbid ไม่มีรอบซ้อน
+                  f=/backups/$(date +%Y%m%d-%H%M%S).dump
+                  pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f "$f.tmp"
+                  mv "$f.tmp" "$f"
+                  ls -1t /backups/*.dump | tail -n +8 | xargs -r rm --
+                  ls -l /backups
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              resources:
+                requests: { cpu: 20m, memory: 32Mi }
+                limits: { memory: 128Mi }
+              volumeMounts:
+                - { name: backups, mountPath: /backups }
+          volumes:
+            - name: backups
+              persistentVolumeClaim: { claimName: db-backups }

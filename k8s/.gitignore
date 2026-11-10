@@ -3,3 +3,7 @@
 # กุญแจเข้า cluster
 kubeconfig*
 
+# P4: กุญแจ HTTPS สร้างเองในเครื่อง ห้ามขึ้น git
+**/tls.key
+**/tls.crt
+certs/

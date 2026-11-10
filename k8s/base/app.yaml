@@ -4,6 +4,10 @@ metadata:
   name: stockapi
 spec:
   replicas: 1
+  # deploy แบบไม่ดับ: เปิดตัวใหม่ให้ "พร้อมจริง" ก่อน แล้วค่อยปิดตัวเก่า (maxUnavailable 0 = ห้ามจำนวนที่พร้อมลดลงระหว่าง deploy)
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
   selector:
     matchLabels: { tier: app }
   template:
@@ -22,9 +26,38 @@ spec:
           imagePullPolicy: Never   # L1 ใช้ image ที่ import เข้า cluster เอง · P5 เปลี่ยนเป็น GHCR
           ports:
             - containerPort: 8080
+          # 3 probe ถามคนละคำถาม:
+          #  startup   = "เปิดเสร็จหรือยัง" · ให้เวลา 60 วิ (แอปลองต่อ DB ซ้ำตอนเริ่มได้ถึง ~30 วิ) · ระหว่างนี้ 2 ตัวล่างยังไม่เริ่ม
+          #  readiness = "รับลูกค้าได้ไหม" → /healthz เช็ค DB · ไม่ผ่าน = ถอดออกจาก Service (ไม่ฆ่า)
+          #  liveness  = "ค้างตายไหม" → แค่ port เปิด · ห้ามใช้ /healthz: DB ล่ม → k8s ฆ่าแอปทุกตัววนไป ทั้งที่แอปไม่ได้เสีย
+          startupProbe:
+            tcpSocket: { port: 8080 }
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            tcpSocket: { port: 8080 }
+            periodSeconds: 10
+            failureThreshold: 3
+          # ตอนปิด: k8s ส่ง SIGTERM พร้อมกับสั่ง Traefik ถอด pod ออก — 2 อย่างนี้ไม่รอกัน
+          # รอ 5 วิก่อนปิดจริง ให้ Traefik เลิกส่งมาก่อน (ไม่รอ = request ที่วิ่งมาช่วงนั้นได้ 502)
+          lifecycle:
+            preStop:
+              sleep: { seconds: 5 }
           env:
-            - name: DB_PATH
-              value: /data/stock.db   # P3 เปลี่ยนเป็น Postgres
+            # ดึงทีละค่าจาก secret ก้อนเดียวกับที่ Postgres ใช้ → รหัสมีที่เดียว ไม่ต้องจำ 2 ที่
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: db-credentials, key: POSTGRES_USER } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: db-credentials, key: POSTGRES_PASSWORD } }
+            - name: POSTGRES_DB
+              valueFrom: { secretKeyRef: { name: db-credentials, key: POSTGRES_DB } }
+            # $(ชื่อ) = Kubernetes แทนค่าจาก env ข้างบนให้ (ต้องประกาศก่อนบรรทัดนี้) · Host=db = Service ชื่อ db ใน namespace เดียวกัน
+            - name: DB_CONNECTION
+              value: Host=db;Username=$(POSTGRES_USER);Password=$(POSTGRES_PASSWORD);Database=$(POSTGRES_DB)
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -33,10 +66,8 @@ spec:
             requests: { cpu: 50m, memory: 96Mi }
             limits: { memory: 256Mi }
           volumeMounts:
-            - { name: data, mountPath: /data }
-            - { name: tmp, mountPath: /tmp }
+            - { name: tmp, mountPath: /tmp }   # readOnlyRootFilesystem → .NET ยังต้องเขียน /tmp
       volumes:
-        - { name: data, emptyDir: {} }
         - { name: tmp, emptyDir: {} }
 ---
 apiVersion: v1

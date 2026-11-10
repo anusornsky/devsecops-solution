@@ -6,6 +6,8 @@ resources:
   - db.yaml
   - netpol.yaml
   - ingress.yaml
+  - backup.yaml
+  - restore.yaml
 labels:
   - pairs:
       app.kubernetes.io/part-of: stockapi

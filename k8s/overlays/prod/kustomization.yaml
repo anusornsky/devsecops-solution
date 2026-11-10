@@ -11,9 +11,18 @@ replicas:
 secretGenerator:
   - name: db-credentials
     envs: [db.env]          # ไฟล์นี้ไม่อยู่ใน git (.gitignore) · สร้างเองตาม db.env.example
+  - name: stockapi-tls      # P4: cert ของ env นี้ · สร้างด้วย openssl (ดูบท P4) · ไม่อยู่ใน git
+    type: kubernetes.io/tls
+    files: [tls.crt, tls.key]
 patches:
   - target: { kind: Ingress, name: stockapi }
     patch: |-
       - op: replace
         path: /spec/rules/0/host
         value: stockapi.prod.localtest.me
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: stockapi.prod.localtest.me
+      - op: replace          # ~1 = เครื่องหมาย / ในชื่อ annotation (กฎของ JSON patch)
+        path: /metadata/annotations/traefik.ingress.kubernetes.io~1router.middlewares
+        value: shop-prod-redirect-https@kubernetescrd

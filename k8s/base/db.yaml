@@ -1,9 +1,12 @@
-# ชั้น DB (P3 จะทำให้เป็นของจริง: StatefulSet + volume ถาวร + backup) · ตอนนี้ใช้พิสูจน์ network policy
+# ชั้น DB: StatefulSet + volume ถาวร (PVC) → pod ตาย/ย้าย ข้อมูลยังอยู่
+# ทางที่ไม่เลือก: Deployment + emptyDir (แบบ L1) — pod restart ครั้งเดียวข้อมูลหายหมด
+# ทำไม StatefulSet ไม่ใช่ Deployment+PVC: rolling update ของ Deployment เปิดตัวใหม่ก่อนปิดตัวเก่า → 2 Postgres แย่งไฟล์เดียวกัน
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: db
 spec:
+  serviceName: db
   replicas: 1
   selector:
     matchLabels: { tier: db }
@@ -12,6 +15,11 @@ spec:
       labels: { tier: db }
     spec:
       automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70          # user "postgres" ของ image alpine
+        fsGroup: 70
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: postgres
           image: postgres:17-alpine
@@ -19,9 +27,27 @@ spec:
             - containerPort: 5432
           envFrom:
             - secretRef: { name: db-credentials }   # สร้างจากไฟล์ db.env ที่ไม่อยู่ใน git (ดู overlays)
+          env:
+            - name: PGDATA       # โฟลเดอร์ย่อย: initdb ไม่ยอมเขียนลง mount point ที่มีไฟล์อื่น (เช่น lost+found)
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec: { command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""] }
+            periodSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
           resources:
             requests: { cpu: 50m, memory: 128Mi }
             limits: { memory: 384Mi }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+  volumeClaimTemplates:          # StatefulSet สร้าง PVC ให้ต่อ pod (data-db-0) · ลบ StatefulSet แล้ว PVC ยังอยู่
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests: { storage: 1Gi }
 ---
 apiVersion: v1
 kind: Service

@@ -26,7 +26,7 @@ spec:
       ports:
         - port: 8080
 ---
-# 3) db รับจาก app ใน namespace เดียวกันที่ port 5432 เท่านั้น
+# 3) db รับจาก app + job backup ใน namespace เดียวกันที่ port 5432 เท่านั้น
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -39,5 +39,7 @@ spec:
     - from:
         - podSelector:
             matchLabels: { tier: app }
+        - podSelector:              # รายการใน from = หรือ (OR) · P3 เพิ่ม backup
+            matchLabels: { tier: backup }
       ports:
         - port: 5432

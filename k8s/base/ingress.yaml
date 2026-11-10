@@ -1,9 +1,16 @@
 # ประตูเดียวจากข้างนอก · host จริงใส่ใน overlay (localtest.me = ชื่อสาธารณะที่ชี้ 127.0.0.1 เสมอ)
+# P4: HTTPS ด้วย cert จาก CA ของเราเอง (ไม่มีโดเมน = ขอ Let's Encrypt ไม่ได้) · http ทุกตัวถูกส่งต่อไป https
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: stockapi
+  annotations:
+    # ชื่อเต็มของ middleware = <namespace>-<ชื่อ>@kubernetescrd · namespace ต่างกันแต่ละ env → overlay แก้ค่านี้
+    traefik.ingress.kubernetes.io/router.middlewares: PLACEHOLDER-redirect-https@kubernetescrd
 spec:
+  tls:
+    - hosts: [PLACEHOLDER]
+      secretName: stockapi-tls     # สร้างจาก tls.crt/tls.key ใน overlay (ไม่อยู่ใน git) · Kustomize ต่อ hash ให้เอง
   rules:
     - host: PLACEHOLDER
       http:
@@ -14,3 +21,13 @@ spec:
               service:
                 name: stockapi
                 port: { number: 80 }
+---
+# Middleware = ของเสริมของ Traefik ที่แทรกก่อนถึงแอป · ตัวนี้ตอบ 301 ให้ไปใช้ https (มาทาง https อยู่แล้ว = ปล่อยผ่าน)
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-https
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true

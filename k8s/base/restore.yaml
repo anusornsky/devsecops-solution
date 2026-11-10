@@ -1,0 +1,56 @@
+# กู้ DB จากไฟล์ backup ล่าสุดใน volume db-backups · สั่งเองตอนต้องกู้เท่านั้น:
+#   kubectl -n <ns> create job restore-1 --from=cronjob/db-restore
+# ทำไมเป็น CronJob ที่ suspend: secretGenerator ต่อท้ายชื่อ secret ด้วย hash (db-credentials-494tddc7m2)
+#   Kustomize แก้ชื่อให้เฉพาะไฟล์ใน kustomization → ไฟล์ Job ที่ create -f ตรงๆ หา secret ไม่เจอ (พังจริงตอนทำบทนี้)
+#   suspend: true = schedule ไม่เคยทำงาน · ใช้เป็นแม่แบบให้ create job --from อย่างเดียว
+# --clean --if-exists = ลบตารางเดิมก่อนสร้างใหม่ → ได้ข้อมูลตรงกับ backup เป๊ะ (ข้อมูลหลัง backup หายหมด — นี่คือราคาของการกู้)
+# --single-transaction = พังกลางทาง rollback ทั้งหมด ไม่ได้ DB ครึ่งเก่าครึ่งใหม่
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: db-restore
+spec:
+  schedule: "0 0 31 2 *"            # 31 ก.พ. = ไม่มีวันนั้น · กันพลาดอีกชั้นถ้าใครเผลอเอา suspend ออก
+  suspend: true
+  jobTemplate:
+    spec:
+      backoffLimit: 0                 # กู้ไม่ผ่าน = หยุดให้คนดู ไม่วนซ้ำเอง
+      template:
+        metadata:
+          labels: { tier: backup }      # ผ่าน NetworkPolicy db-from-app
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: restore
+              image: postgres:17-alpine
+              envFrom:
+                - secretRef: { name: db-credentials }
+              env:
+                - { name: PGHOST, value: db }
+                - name: PGPASSWORD
+                  valueFrom: { secretKeyRef: { name: db-credentials, key: POSTGRES_PASSWORD } }
+              command:
+                - sh
+                - -c
+                - |
+                  set -e
+                  # pod ใหม่ต่อ DB ไม่ได้ช่วงวินาทีแรก (NetworkPolicy ของ k3s ยังไม่รู้จัก IP ใหม่ · พิสูจน์แล้ว: ทันที=no response, 5 วิ=ได้)
+                  for i in $(seq 30); do pg_isready -q && break; sleep 1; done
+                  f=$(ls -1t /backups/*.dump | head -n 1)
+                  echo "restore from $f"
+                  pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --single-transaction "$f"
+                  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select count(*) as products from products"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              volumeMounts:
+                - { name: backups, mountPath: /backups, readOnly: true }
+          volumes:
+            - name: backups
+              persistentVolumeClaim: { claimName: db-backups }
